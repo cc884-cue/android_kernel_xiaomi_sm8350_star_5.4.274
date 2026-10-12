@@ -121,10 +121,10 @@ struct devfreq_dev_profile {
  *		devfreq.nb to the corresponding register notifier call chain.
  * @work:	delayed work for load monitoring.
  * @previous_freq:	previously configured frequency value.
- * @data:	devfreq driver pass to governors, governor should not change it.
- * @governor_data:	private data for governors, devfreq core doesn't touch it.
- * @min_freq:   Limit minimum frequency requested by user (0: none)
- * @max_freq:   Limit maximum frequency requested by user (0: none)
+ * @data:	Private data of the governor. The devfreq framework does not
+ *		touch this.
+ * @min_freq:	Limit minimum frequency requested by user (0: none)
+ * @max_freq:	Limit maximum frequency requested by user (0: none)
  * @scaling_min_freq:	Limit minimum frequency requested by OPP interface
  * @scaling_max_freq:	Limit maximum frequency requested by OPP interface
  * @stop_polling:	 devfreq polling status of a device.
@@ -149,6 +149,9 @@ struct devfreq {
 	struct list_head node;
 
 	struct mutex lock;
+#ifdef CONFIG_QCOM_DEVFREQ_ICC
+	struct mutex event_lock;
+#endif
 	struct device dev;
 	struct devfreq_dev_profile *profile;
 	const struct devfreq_governor *governor;
@@ -159,8 +162,7 @@ struct devfreq {
 	unsigned long previous_freq;
 	struct devfreq_dev_status last_status;
 
-	void *data;
-	void *governor_data;
+	void *data; /* private data for governors */
 
 	unsigned long min_freq;
 	unsigned long max_freq;
@@ -185,6 +187,31 @@ struct devfreq_freqs {
 	unsigned long old;
 	unsigned long new;
 };
+
+static inline void event_mutex_init(struct devfreq *devfreq)
+{
+#ifdef CONFIG_QCOM_DEVFREQ_ICC
+	mutex_init(&devfreq->event_lock);
+#endif
+}
+static inline void event_mutex_destroy(struct devfreq *devfreq)
+{
+#ifdef CONFIG_QCOM_DEVFREQ_ICC
+	mutex_destroy(&devfreq->event_lock);
+#endif
+}
+static inline void event_mutex_lock(struct devfreq *devfreq)
+{
+#ifdef CONFIG_QCOM_DEVFREQ_ICC
+	mutex_lock(&devfreq->event_lock);
+#endif
+}
+static inline void event_mutex_unlock(struct devfreq *devfreq)
+{
+#ifdef CONFIG_QCOM_DEVFREQ_ICC
+	mutex_unlock(&devfreq->event_lock);
+#endif
+}
 
 #if defined(CONFIG_PM_DEVFREQ)
 extern struct devfreq *devfreq_add_device(struct device *dev,

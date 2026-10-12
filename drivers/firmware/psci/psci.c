@@ -265,7 +265,8 @@ static int get_set_conduit_method(struct device_node *np)
 	return 0;
 }
 
-static void psci_sys_reset(enum reboot_mode reboot_mode, const char *cmd)
+static int psci_sys_reset(struct notifier_block *nb, unsigned long action,
+			  void *data)
 {
 	if ((reboot_mode == REBOOT_WARM || reboot_mode == REBOOT_SOFT) &&
 	    psci_system_reset2_supported) {
@@ -278,7 +279,14 @@ static void psci_sys_reset(enum reboot_mode reboot_mode, const char *cmd)
 	} else {
 		invoke_psci_fn(PSCI_0_2_FN_SYSTEM_RESET, 0, 0, 0);
 	}
+
+	return NOTIFY_DONE;
 }
+
+static struct notifier_block psci_sys_reset_nb = {
+	.notifier_call = psci_sys_reset,
+	.priority = 129,
+};
 
 static void psci_sys_poweroff(void)
 {
@@ -446,7 +454,7 @@ static void __init psci_0_2_set_functions(void)
 
 	psci_ops.migrate_info_type = psci_migrate_info_type;
 
-	arm_pm_restart = psci_sys_reset;
+	register_restart_handler(&psci_sys_reset_nb);
 
 	pm_power_off = psci_sys_poweroff;
 }
@@ -543,6 +551,27 @@ static int __init psci_0_1_init(struct device_node *np)
 	return 0;
 }
 
+#ifdef CONFIG_QGKI_PSCI_OSI_SUPPORT
+static int psci_set_osi_mode(void)
+{
+	int err;
+
+	/*
+	 * If SET_SUSPEND_MODE is not supported,
+	 * assume HYP/firmware are defaulting to OSI
+	 */
+	err = psci_features(PSCI_1_0_FN_SET_SUSPEND_MODE);
+	if (err == PSCI_RET_NOT_SUPPORTED) {
+		pr_info("Assuming FW runs OSI.\n");
+		return 0;
+	}
+
+	err = invoke_psci_fn(PSCI_1_0_FN_SET_SUSPEND_MODE,
+			     PSCI_1_0_SUSPEND_MODE_OSI, 0, 0);
+	return psci_to_linux_errno(err);
+}
+#endif /* CONFIG_QGKI_PSCI_OSI_SUPPORT */
+
 static int __init psci_1_0_init(struct device_node *np)
 {
 	int err;
@@ -551,8 +580,16 @@ static int __init psci_1_0_init(struct device_node *np)
 	if (err)
 		return err;
 
+#ifdef CONFIG_QGKI_PSCI_OSI_SUPPORT
+	if (psci_has_osi_support()) {
+		pr_info("OSI mode supported.\n");
+		if (!psci_set_osi_mode())
+			pr_info("Switched to OSI mode.\n");
+	}
+#else
 	if (psci_has_osi_support())
 		pr_info("OSI mode supported.\n");
+#endif /* CONFIG_QGKI_PSCI_OSI_SUPPORT */
 
 	return 0;
 }

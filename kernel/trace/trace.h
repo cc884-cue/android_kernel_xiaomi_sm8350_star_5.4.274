@@ -309,7 +309,6 @@ struct trace_array {
 	struct trace_event_file *trace_marker_file;
 	cpumask_var_t		tracing_cpumask; /* only trace on set CPUs */
 	int			ref;
-	int			trace_ref;
 #ifdef CONFIG_FUNCTION_TRACER
 	struct ftrace_ops	*ops;
 	struct trace_pid_list	__rcu *function_pids;
@@ -499,6 +498,7 @@ struct tracer {
 	struct tracer		*next;
 	struct tracer_flags	*flags;
 	int			enabled;
+	int			ref;
 	bool			print_max;
 	bool			allow_instances;
 #ifdef CONFIG_TRACER_MAX_TRACE
@@ -1458,11 +1458,34 @@ __event_trigger_test_discard(struct trace_event_file *file,
  * @entry: The event itself
  * @irq_flags: The state of the interrupts at the start of the event
  * @pc: The state of the preempt count at the start of the event.
+ * @len: The length of the payload data required for stm logging.
  *
  * This is a helper function to handle triggers that require data
  * from the event itself. It also tests the event against filters and
  * if the event is soft disabled and should be discarded.
  */
+#ifdef CONFIG_CORESIGHT_QGKI
+static inline void
+event_trigger_unlock_commit(struct trace_event_file *file,
+			    struct ring_buffer *buffer,
+			    struct ring_buffer_event *event,
+			    void *entry, unsigned long irq_flags, int pc,
+			    unsigned long len)
+{
+	enum event_trigger_type tt = ETT_NONE;
+
+	if (!__event_trigger_test_discard(file, buffer, event, entry, &tt)) {
+		if (len)
+			stm_log(OST_ENTITY_FTRACE_EVENTS, entry, len);
+
+		trace_buffer_unlock_commit(file->tr, buffer, event,
+						irq_flags, pc);
+	}
+
+	if (tt)
+		event_triggers_post_call(file, tt);
+}
+#else
 static inline void
 event_trigger_unlock_commit(struct trace_event_file *file,
 			    struct ring_buffer *buffer,
@@ -1477,7 +1500,7 @@ event_trigger_unlock_commit(struct trace_event_file *file,
 	if (tt)
 		event_triggers_post_call(file, tt);
 }
-
+#endif
 /**
  * event_trigger_unlock_commit_regs - handle triggers and finish event commit
  * @file: The file pointer assoctiated to the event
@@ -1695,9 +1718,6 @@ get_named_trigger_data(struct event_trigger_data *data);
 extern int register_event_command(struct event_command *cmd);
 extern int unregister_event_command(struct event_command *cmd);
 extern int register_trigger_hist_enable_disable_cmds(void);
-
-extern void event_file_get(struct trace_event_file *file);
-extern void event_file_put(struct trace_event_file *file);
 
 /**
  * struct event_trigger_ops - callbacks for trace event triggers

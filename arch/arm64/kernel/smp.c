@@ -44,17 +44,27 @@
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/processor.h>
+#include <asm/scs.h>
 #include <asm/smp_plat.h>
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
 #include <asm/ptrace.h>
 #include <asm/virt.h>
+#include <asm/system_misc.h>
+#include <soc/qcom/lpm_levels.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/ipi.h>
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/debug.h>
 
 DEFINE_PER_CPU_READ_MOSTLY(int, cpu_number);
 EXPORT_PER_CPU_SYMBOL(cpu_number);
+
+#ifdef CONFIG_QGKI_LPM_IPI_CHECK
+DEFINE_PER_CPU(bool, pending_ipi);
+EXPORT_PER_CPU_SYMBOL(pending_ipi);
+#endif /* CONFIG_QGKI_LPM_IPI_CHECK */
 
 /*
  * as from 2.5, kernels no longer have an init_tasks structure
@@ -336,7 +346,7 @@ void __cpu_die(unsigned int cpu)
 		pr_crit("CPU%u: cpu didn't die\n", cpu);
 		return;
 	}
-	pr_notice("CPU%u: shutdown\n", cpu);
+	pr_info("CPU%u: shutdown\n", cpu);
 
 	/*
 	 * Now that the dying CPU is beyond the point of no return w.r.t.
@@ -357,6 +367,9 @@ void __cpu_die(unsigned int cpu)
 void cpu_die(void)
 {
 	unsigned int cpu = smp_processor_id();
+
+	/* Save the shadow stack pointer before exiting the idle task */
+	scs_save(current);
 
 	idle_task_exit();
 
@@ -775,6 +788,13 @@ static const char *ipi_types[NR_IPI] __tracepoint_string = {
 
 static void smp_cross_call(const struct cpumask *target, unsigned int ipinr)
 {
+#ifdef CONFIG_QGKI_LPM_IPI_CHECK
+	unsigned int cpu;
+
+	for_each_cpu(cpu, target)
+		per_cpu(pending_ipi, cpu) = true;
+#endif /* CONFIG_QGKI_LPM_IPI_CHECK */
+
 	trace_ipi_raise(target, ipi_types[ipinr]);
 	__smp_cross_call(target, ipinr);
 }
@@ -829,9 +849,26 @@ void arch_irq_work_raise(void)
 }
 #endif
 
+static DEFINE_RAW_SPINLOCK(stop_lock);
+
+static DEFINE_PER_CPU(struct pt_regs, regs_before_stop);
+
 static void local_cpu_stop(void)
 {
-	set_cpu_online(smp_processor_id(), false);
+	unsigned int cpu = smp_processor_id();
+	struct pt_regs *regs = get_irq_regs();
+
+	if (system_state == SYSTEM_BOOTING ||
+	    system_state == SYSTEM_RUNNING) {
+		per_cpu(regs_before_stop, cpu) = *regs;
+		raw_spin_lock(&stop_lock);
+		pr_crit("CPU%u: stopping\n", cpu);
+		__show_regs(regs);
+		dump_stack();
+		raw_spin_unlock(&stop_lock);
+	}
+
+	set_cpu_online(cpu, false);
 
 	local_daif_mask();
 	sdei_mask_local_cpu();
@@ -897,6 +934,7 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 		break;
 
 	case IPI_CPU_STOP:
+		trace_android_vh_ipi_stop_rcuidle(regs);
 		irq_enter();
 		local_cpu_stop();
 		irq_exit();
@@ -942,11 +980,17 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 
 	if ((unsigned)ipinr < NR_IPI)
 		trace_ipi_exit_rcuidle(ipi_types[ipinr]);
+
+#ifdef CONFIG_QGKI_LPM_IPI_CHECK
+	this_cpu_write(pending_ipi, false);
+#endif /* CONFIG_QGKI_LPM_IPI_CHECK */
+
 	set_irq_regs(old_regs);
 }
 
 void smp_send_reschedule(int cpu)
 {
+	update_ipi_history(cpu);
 	smp_cross_call(cpumask_of(cpu), IPI_RESCHEDULE);
 }
 

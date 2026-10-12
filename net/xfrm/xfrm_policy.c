@@ -31,10 +31,14 @@
 #include <linux/if_tunnel.h>
 #include <net/dst.h>
 #include <net/flow.h>
+#ifndef __GENKSYMS__
 #include <net/inet_ecn.h>
+#endif
 #include <net/xfrm.h>
 #include <net/ip.h>
+#ifndef __GENKSYMS__
 #include <net/gre.h>
+#endif
 #if IS_ENABLED(CONFIG_IPV6_MIP6)
 #include <net/mip6.h>
 #endif
@@ -1369,6 +1373,8 @@ EXPORT_SYMBOL(xfrm_policy_hash_rebuild);
  * of an absolute inpredictability of ordering of rules. This will not pass. */
 static u32 xfrm_gen_index(struct net *net, int dir, u32 index)
 {
+	static u32 idx_generator;
+
 	for (;;) {
 		struct hlist_head *list;
 		struct xfrm_policy *p;
@@ -1376,8 +1382,8 @@ static u32 xfrm_gen_index(struct net *net, int dir, u32 index)
 		int found;
 
 		if (!index) {
-			idx = (net->xfrm.idx_generator | dir);
-			net->xfrm.idx_generator += 8;
+			idx = (idx_generator | dir);
+			idx_generator += 8;
 		} else {
 			idx = index;
 			index = 0;

@@ -40,6 +40,8 @@
 #if IS_ENABLED(CONFIG_NF_CONNTRACK)
 #include <linux/netfilter/nf_conntrack_common.h>
 #endif
+#include <linux/android_kabi.h>
+#include <linux/android_vendor.h>
 
 /* The interface for checksum offload between the stack and networking drivers
  * is as follows...
@@ -530,6 +532,8 @@ struct skb_shared_info {
 	 * remains valid until skb destructor */
 	void *		destructor_arg;
 
+	ANDROID_VENDOR_DATA_ARRAY(1, 3);
+
 	/* must be last field, see pskb_expand_head() */
 	skb_frag_t	frags[MAX_SKB_FRAGS];
 };
@@ -593,6 +597,8 @@ enum {
 	SKB_GSO_UDP = 1 << 16,
 
 	SKB_GSO_UDP_L4 = 1 << 17,
+
+	SKB_GSO_FRAGLIST = 1 << 18,
 };
 
 #if BITS_PER_LONG > 32
@@ -810,6 +816,10 @@ struct sk_buff {
 
 	__u8			ipvs_property:1;
 	__u8			inner_protocol_type:1;
+
+#ifdef CONFIG_ENABLE_SFE
+	__u8			fast_forwarded:1;
+#endif
 	__u8			remcsum_offload:1;
 #ifdef CONFIG_NET_SWITCHDEV
 	__u8			offload_fwd_mark:1;
@@ -826,7 +836,6 @@ struct sk_buff {
 #ifdef CONFIG_TLS_DEVICE
 	__u8			decrypted:1;
 #endif
-	__u8			scm_io_uring:1;
 
 #ifdef CONFIG_NET_SCHED
 	__u16			tc_index;	/* traffic control index */
@@ -876,6 +885,27 @@ struct sk_buff {
 	/* private: */
 	__u32			headers_end[0];
 	/* public: */
+
+	/* Android KABI preservation.
+	 *
+	 * "open coded" version of ANDROID_KABI_USE() to pack more
+	 * fields/variables into the space that we have.
+	 *
+	 * scm_io_uring is from 04df9719df18 ("io_uring/af_unix: defer
+	 * registered files gc to io_uring release")
+	 */
+	/* NOTE: due to these fields ending up after headers_end, we have to
+	 * manually copy them in the __copy_skb_header() call in skbuf.c.  Be
+	 * very aware of that if you change these fields.
+	 */
+	_ANDROID_KABI_REPLACE(_ANDROID_KABI_RESERVE(1),
+			 struct {
+				__u8 scm_io_uring:1;
+				__u8 android_kabi_reserved1_padding1;
+				__u16 android_kabi_reserved1_padding2;
+				__u32 android_kabi_reserved1_padding3;
+				});
+	ANDROID_KABI_RESERVE(2);
 
 	/* These elements must be at the end, see alloc_skb() for details.  */
 	sk_buff_data_t		tail;
@@ -3554,11 +3584,18 @@ void skb_scrub_packet(struct sk_buff *skb, bool xnet);
 bool skb_gso_validate_network_len(const struct sk_buff *skb, unsigned int mtu);
 bool skb_gso_validate_mac_len(const struct sk_buff *skb, unsigned int len);
 struct sk_buff *skb_segment(struct sk_buff *skb, netdev_features_t features);
+struct sk_buff *skb_segment_list(struct sk_buff *skb, netdev_features_t features,
+				 unsigned int offset);
 struct sk_buff *skb_vlan_untag(struct sk_buff *skb);
 int skb_ensure_writable(struct sk_buff *skb, int write_len);
 int __skb_vlan_pop(struct sk_buff *skb, u16 *vlan_tci);
 int skb_vlan_pop(struct sk_buff *skb);
 int skb_vlan_push(struct sk_buff *skb, __be16 vlan_proto, u16 vlan_tci);
+#ifdef CONFIG_NET_SCHED_ACT_VLAN_QGKI
+int skb_eth_pop(struct sk_buff *skb);
+int skb_eth_push(struct sk_buff *skb, const unsigned char *dst,
+		 const unsigned char *src);
+#endif
 int skb_mpls_push(struct sk_buff *skb, __be32 mpls_lse, __be16 mpls_proto,
 		  int mac_len, bool ethernet);
 int skb_mpls_pop(struct sk_buff *skb, __be16 next_proto, int mac_len,

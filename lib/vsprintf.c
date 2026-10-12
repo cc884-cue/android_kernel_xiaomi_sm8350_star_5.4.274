@@ -766,6 +766,32 @@ static int __init initialize_ptr_random(void)
 	return ret;
 }
 early_initcall(initialize_ptr_random);
+ 
+static inline int __ptr_to_hashval(const void *ptr, unsigned long *hashval_out)
+{
+	unsigned long hashval;
+
+	if (static_branch_unlikely(&not_filled_random_ptr_key))
+		return -EAGAIN;
+
+#ifdef CONFIG_64BIT
+	hashval = (unsigned long)siphash_1u64((u64)ptr, &ptr_key);
+	/*
+	 * Mask off the first 32 bits, this makes explicit that we have
+	 * modified the address (and 32 bits is plenty for a unique ID).
+	 */
+	hashval = hashval & 0xffffffff;
+#else
+	hashval = (unsigned long)siphash_1u32((u32)ptr, &ptr_key);
+#endif
+	*hashval_out = hashval;
+	return 0;
+}
+
+int ptr_to_hashval(const void *ptr, unsigned long *hashval_out)
+{
+	return __ptr_to_hashval(ptr, hashval_out);
+}
 
 /* Maps a pointer to a 32 bit unique identifier. */
 static char *ptr_to_id(char *buf, char *end, const void *ptr,
@@ -773,6 +799,7 @@ static char *ptr_to_id(char *buf, char *end, const void *ptr,
 {
 	const char *str = sizeof(ptr) == 8 ? "(____ptrval____)" : "(ptrval)";
 	unsigned long hashval;
+	int ret;
 
 	/*
 	 * Print the real pointer value for NULL and error pointers,
@@ -787,22 +814,13 @@ static char *ptr_to_id(char *buf, char *end, const void *ptr,
 		return pointer_string(buf, end, (const void *)hashval, spec);
 	}
 
-	if (static_branch_unlikely(&not_filled_random_ptr_key)) {
+	ret = __ptr_to_hashval(ptr, &hashval);
+	if (ret) {
 		spec.field_width = 2 * sizeof(ptr);
 		/* string length must be less than default_width */
 		return error_string(buf, end, str, spec);
 	}
 
-#ifdef CONFIG_64BIT
-	hashval = (unsigned long)siphash_1u64((u64)ptr, &ptr_key);
-	/*
-	 * Mask off the first 32 bits, this makes explicit that we have
-	 * modified the address (and 32 bits is plenty for a unique ID).
-	 */
-	hashval = hashval & 0xffffffff;
-#else
-	hashval = (unsigned long)siphash_1u32((u32)ptr, &ptr_key);
-#endif
 	return pointer_string(buf, end, (const void *)hashval, spec);
 }
 
@@ -2198,6 +2216,8 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 	case 'V':
 		return va_format(buf, end, ptr, spec, fmt);
 	case 'K':
+		if (IS_ENABLED(CONFIG_DEBUG_CONSOLE_UNHASHED_POINTERS))
+			break;
 		return restricted_pointer(buf, end, ptr, spec);
 	case 'N':
 		return netdev_bits(buf, end, ptr, spec, fmt);
@@ -2223,6 +2243,9 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 	case 'x':
 		return pointer_string(buf, end, ptr, spec);
 	}
+
+	if (IS_ENABLED(CONFIG_DEBUG_CONSOLE_UNHASHED_POINTERS))
+		return pointer_string(buf, end, ptr, spec);
 
 	/* default is to _not_ leak addresses, hash before printing */
 	return ptr_to_id(buf, end, ptr, spec);

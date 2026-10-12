@@ -75,6 +75,10 @@ static int msg_level = -1;
 module_param (msg_level, int, 0);
 MODULE_PARM_DESC (msg_level, "Override default message level");
 
+static int usb0_rx_skb_threshold = 500;
+module_param(usb0_rx_skb_threshold, int, 0644);
+MODULE_PARM_DESC(usb0_rx_skb_threshold, "Throttle rx traffic in USB3");
+
 /*-------------------------------------------------------------------------*/
 
 /* handles CDC Ethernet and many other network "bulk data" interfaces */
@@ -654,9 +658,13 @@ block:
 		if (netif_running (dev->net) &&
 		    !test_bit (EVENT_RX_HALT, &dev->flags) &&
 		    state != unlink_start) {
-			rx_submit (dev, urb, GFP_ATOMIC);
-			usb_mark_last_busy(dev->udev);
-			return;
+			if ((!(dev->driver_info->flags & FLAG_THROTTLE_RX)) ||
+				((dev->driver_info->flags & FLAG_THROTTLE_RX) &&
+				(dev->done.qlen < usb0_rx_skb_threshold))) {
+				rx_submit(dev, urb, GFP_ATOMIC);
+				usb_mark_last_busy(dev->udev);
+				return;
+			}
 		}
 		usb_free_urb (urb);
 	}
@@ -1571,6 +1579,13 @@ static void usbnet_bh (struct timer_list *t)
 	}
 }
 
+static void usbnet_bh_tasklet(unsigned long data)
+{
+	struct timer_list *t = (struct timer_list *)data;
+
+	usbnet_bh(t);
+}
+
 
 /*-------------------------------------------------------------------------
  *
@@ -1701,7 +1716,7 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 	skb_queue_head_init (&dev->txq);
 	skb_queue_head_init (&dev->done);
 	skb_queue_head_init(&dev->rxq_pause);
-	dev->bh.func = (void (*)(unsigned long))usbnet_bh;
+	dev->bh.func = usbnet_bh_tasklet;
 	dev->bh.data = (unsigned long)&dev->delay;
 	INIT_WORK (&dev->kevent, usbnet_deferred_kevent);
 	init_usb_anchor(&dev->deferred);

@@ -118,9 +118,11 @@ struct snd_card {
 	const struct attribute_group *dev_groups[4]; /* assigned sysfs attr */
 	bool registered;		/* card_dev is registered? */
 	wait_queue_head_t remove_sleep;
-
-	size_t total_pcm_alloc_bytes;	/* total amount of allocated buffers */
-	struct mutex memory_mutex;	/* protection for the above */
+#ifdef CONFIG_AUDIO_QGKI
+	int offline;			/* if this sound card is offline */
+	unsigned long offline_change;
+	wait_queue_head_t offline_poll_wait;
+#endif
 
 #ifdef CONFIG_PM
 	unsigned int power_state;	/* power state */
@@ -252,6 +254,11 @@ static inline void snd_card_unref(struct snd_card *card)
 {
 	put_device(&card->card_dev);
 }
+
+#ifdef CONFIG_AUDIO_QGKI
+void snd_card_change_online_state(struct snd_card *card, int online);
+bool snd_card_is_online_state(struct snd_card *card);
+#endif
 
 #define snd_card_set_dev(card, devptr) ((card)->dev = (devptr))
 

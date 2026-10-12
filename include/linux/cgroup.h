@@ -71,7 +71,8 @@ struct css_task_iter {
 
 extern struct file_system_type cgroup_fs_type;
 extern struct cgroup_root cgrp_dfl_root;
-extern struct css_set init_css_set;
+extern struct ext_css_set init_ext_css_set;
+#define init_css_set init_ext_css_set.cset
 
 #define SUBSYS(_x) extern struct cgroup_subsys _x ## _cgrp_subsys;
 #include <linux/cgroup_subsys.h>
@@ -671,6 +672,8 @@ static inline struct psi_group *cgroup_psi(struct cgroup *cgrp)
 	return &cgrp->psi;
 }
 
+bool cgroup_psi_enabled(void);
+
 static inline void cgroup_init_kthreadd(void)
 {
 	/*
@@ -734,6 +737,11 @@ static inline struct cgroup *cgroup_parent(struct cgroup *cgrp)
 static inline struct psi_group *cgroup_psi(struct cgroup *cgrp)
 {
 	return NULL;
+}
+
+static inline bool cgroup_psi_enabled(void)
+{
+	return false;
 }
 
 static inline bool task_under_cgroup_hierarchy(struct task_struct *task,
