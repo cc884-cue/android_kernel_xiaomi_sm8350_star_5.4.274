@@ -150,14 +150,15 @@ int battery_chg_write(struct battery_chg_dev *bcdev, void *data,
 					msecs_to_jiffies(BC_WAIT_TIME_MS));
 		if (!rc) {
 			pr_err("Error, timed out sending message\n");
-			mutex_unlock(&bcdev->rw_lock);
+			rc = -ETIMEDOUT;
+		} else {
+			rc = 0;
 		}
 
-		rc = 0;
 	}
 	mutex_unlock(&bcdev->rw_lock);
 
-	return 0;
+	return rc;
 }
 
 int write_property_id(struct battery_chg_dev *bcdev,
