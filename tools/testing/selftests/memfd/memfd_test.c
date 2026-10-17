@@ -1033,6 +1033,35 @@ static void test_noexec_seal(void)
 	close(fd);
 }
 
+/*
+ * Test F_SEAL_EXEC on an executable memfd with an existing writable mapping.
+ * The implied F_SEAL_WRITE must fail until the mapping has been removed.
+ */
+static void test_seal_exec_with_writable_mapping(void)
+{
+	const unsigned int expected_seals = F_SEAL_EXEC | F_SEAL_SHRINK |
+					    F_SEAL_GROW | F_SEAL_WRITE |
+					    F_SEAL_FUTURE_WRITE;
+	int fd;
+	void *p;
+
+	printf("%s SEAL-EXEC-WRITABLE-MAPPING\n", memfd_str);
+
+	fd = mfd_assert_new("kern_memfd_exec_seal",
+			    mfd_def_size,
+			    MFD_EXEC | MFD_ALLOW_SEALING);
+	p = mfd_assert_mmap_shared(fd);
+
+	mfd_fail_add_seals(fd, F_SEAL_EXEC);
+	mfd_assert_has_seals(fd, 0);
+	*(char *)p = 1;
+	munmap(p, mfd_def_size);
+
+	mfd_assert_add_seals(fd, F_SEAL_EXEC);
+	mfd_assert_has_seals(fd, expected_seals);
+	close(fd);
+}
+
 int main(int argc, char **argv)
 {
 	pid_t pid;
@@ -1058,6 +1087,7 @@ int main(int argc, char **argv)
 	test_create();
 	test_basic();
 	test_noexec_seal();
+	test_seal_exec_with_writable_mapping();
 
 	test_seal_write();
 	test_seal_future_write();
