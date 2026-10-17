@@ -636,6 +636,7 @@ static void test_create(void)
 	mfd_fail_new("", ~MFD_ALLOW_SEALING);
 	mfd_fail_new("", ~0);
 	mfd_fail_new("", 0x80000000U);
+	mfd_fail_new("", MFD_EXEC | MFD_NOEXEC_SEAL);
 
 	/* verify MFD_CLOEXEC is allowed */
 	fd = mfd_assert_new("", 0, MFD_CLOEXEC);
@@ -993,6 +994,45 @@ static void test_share_fork(char *banner, char *b_suffix)
 	close(fd);
 }
 
+/*
+ * Test MFD_NOEXEC_SEAL
+ * Verify that a sealed non-executable memfd cannot regain execute bits.
+ */
+static void test_noexec_seal(void)
+{
+	struct stat st;
+	int fd, ret;
+
+	printf("%s NOEXEC-SEAL\n", memfd_str);
+
+	fd = sys_memfd_create("kern_memfd_noexec",
+			      MFD_NOEXEC_SEAL | MFD_ALLOW_SEALING);
+	if (fd < 0) {
+		printf("memfd_create(MFD_NOEXEC_SEAL) failed: %m\n");
+		abort();
+	}
+
+	mfd_assert_has_seals(fd, F_SEAL_EXEC);
+	if (fstat(fd, &st) < 0) {
+		printf("fstat(%d) failed: %m\n", fd);
+		abort();
+	}
+	if (st.st_mode & 0111) {
+		printf("MFD_NOEXEC_SEAL created an executable memfd\n");
+		abort();
+	}
+
+	errno = 0;
+	ret = fchmod(fd, st.st_mode | 0100);
+	if (ret == 0 || errno != EPERM) {
+		printf("fchmod unexpectedly changed execute bits: ret=%d errno=%d\n",
+		       ret, errno);
+		abort();
+	}
+
+	close(fd);
+}
+
 int main(int argc, char **argv)
 {
 	pid_t pid;
@@ -1017,6 +1057,7 @@ int main(int argc, char **argv)
 
 	test_create();
 	test_basic();
+	test_noexec_seal();
 
 	test_seal_write();
 	test_seal_future_write();

@@ -763,6 +763,11 @@ static int hugetlbfs_setattr(struct dentry *dentry, struct iattr *attr)
 	if (error)
 		return error;
 
+	if ((info->seals & F_SEAL_EXEC) && (ia_valid & ATTR_MODE)) {
+		if ((inode->i_mode ^ attr->ia_mode) & 0111)
+			return -EPERM;
+	}
+
 	if (ia_valid & ATTR_SIZE) {
 		loff_t oldsize = inode->i_size;
 		loff_t newsize = attr->ia_size;
