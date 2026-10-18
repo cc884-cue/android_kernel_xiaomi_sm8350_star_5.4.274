@@ -77,34 +77,40 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 CONFIG_KSU_SUSFS_SUS_MAP=y
 ```
 
-ReSukiSU 钩子方式为 `choice` 单选，本配置选择 **`KSU_SUSFS`（SUSFS 内联钩子）**，替代此前的 `CONFIG_KSU_MANUAL_HOOK` 组合。内核侧集成了 [`gitlab.com/simonpunk/susfs4ksu`](https://gitlab.com/simonpunk/susfs4ksu) `kernel-5.4` 分支的 `50_add_susfs_in_kernel-5.4.patch`（针对本树手动适配的部分见提交记录），新增内核文件：
+ReSukiSU 钩子方式为 `choice` 单选，本配置选择 **`KSU_SUSFS`（SUSFS 内联钩子）**，替代此前的 `CONFIG_KSU_MANUAL_HOOK` 组合。内核侧集成 SUSFS **`v2.1.0`**（`fs/susfs.c` 与 `include/linux/susfs.h` 中 `SUSFS_VERSION` 为准），以参考树 v2.1.0 完整实现为蓝本，针对本 5.4.274 QGKI 树逐文件适配；新增内核文件：
 
 | 文件 | 说明 |
 | --- | --- |
-| [`fs/susfs.c`](fs/susfs.c) · [`include/linux/susfs.h`](include/linux/susfs.h) · [`include/linux/susfs_def.h`](include/linux/susfs_def.h) | SUSFS 核心（sus mount、sus kstat、sus path、uname / cmdline 伪装等） |
-| [`fs/sus_su.c`](fs/sus_su.c) · [`include/linux/sus_su.h`](include/linux/sus_su.h) | sus_su 工具侧代码；`CONFIG_KSU_SUSFS_SUS_SU` 不在 ReSukiSU 的 Kconfig 菜单中，保持关闭 |
+| [`fs/susfs.c`](fs/susfs.c) · [`include/linux/susfs.h`](include/linux/susfs.h) · [`include/linux/susfs_def.h`](include/linux/susfs_def.h) | SUSFS v2.1.0 核心（sus mount / kstat / path / map / open redirect、uname / cmdline 伪装、avc log 伪装、ksu domain 挂载隔离等） |
 
-内核已有的显式调用点（SUSFS 模式下改为 `CONFIG_KSU` 守卫，suid / initrc / input 三处为新加，`CONFIG_KSU_SUSFS` 守卫）：
+相对 v1.5.5 的主要结构变化（沿用上游 v2.1.0 设计）：
+
+- 移除 sus_su（`fs/sus_su.c` 等），不再挂 devpts su 特殊文件；
+- 进程状态改用线程标志位（`TIF_PROC_NO_SU` / `TIF_PROC_UMOUNTED`，见 `include/linux/susfs_def.h`），不再扩展 `task_struct` KABI 字段；
+- sus mount 伪装改由 `susfs_alloc_unshare_ksu_vfsmnt` / `susfs_alloc_non_unshare_ksu_vfsmnt` 的假 `mnt_id`（从 `DEFAULT_KSU_MNT_ID=500000` 起）方案承担，不再备份 KABI 字段；
+- 新增 `SUSFS_SUS_MAP`（vMA 正文伪装）、`SUSFS_OPEN_REDIRECT`、`HIDE_SUS_MNTS_FOR_NON_SU_PROCS`、`AVC_LOG_SPOOFING` 等 ReSukiSU rc2 依赖的命令集。
+
+内核侧 ReSukiSU 显式调用点（v2.1.0 风格，`CONFIG_KSU` / `CONFIG_KSU_SUSFS` 守卫）：
 
 | 路径 | 接入内容 |
 | --- | --- |
-| [`fs/exec.c`](fs/exec.c) | 在 exec 执行前后调用 ReSukiSU 的处理函数 |
-| [`fs/open.c`](fs/open.c) | 在 `faccessat` 的访问检查前调用处理函数 |
-| [`fs/stat.c`](fs/stat.c) | 接入 `newfstatat` / `fstatat64` 的路径处理，以及 `newfstat` / `fstat64` 的返回处理 |
-| [`kernel/reboot.c`](kernel/reboot.c) | 接入 ReSukiSU 约定的 reboot 扩展处理入口 |
+| [`fs/exec.c`](fs/exec.c) | execve 经 `ksu_su_compat_enabled` 静态键分流 `ksu_handle_execveat` / `ksu_handle_execveat_sucompat` |
+| [`fs/open.c`](fs/open.c) | `do_faccessat` 路径处理（allow uid 时经 `ksu_su_compat_enabled` 分流） |
+| [`fs/stat.c`](fs/stat.c) | `vfs_statx` 路径处理 + `vfs_statx_fd` 的 `ksu_handle_vfs_fstat`（kstat 大小伪装） |
+| [`kernel/reboot.c`](kernel/reboot.c) | ReSukiSU 约定的 reboot 扩展处理入口（magic 返回） |
 | [`kernel/sys.c`](kernel/sys.c) | `setresuid` 处理（替代 manual 模式的 LSM 自动接入） |
-| [`fs/read_write.c`](fs/read_write.c) | `read` 的 init rc 处理（替代 manual 模式的 LSM 自动接入） |
-| [`drivers/input/input.c`](drivers/input/input.c) | 输入事件处理（替代 manual 模式的 `input_handler` 自动接入） |
+| [`fs/read_write.c`](fs/read_write.c) | `read` 的 init rc 处理（`ksu_is_init_rc_hook_enabled` 静态键） |
+| [`drivers/input/input.c`](drivers/input/input.c) | 输入事件处理（`ksu_is_input_hook_enabled` 静态键） |
 
-SUSFS 模式下 LSM 的 `AUTO_*` 自动接入不可用（其 Kconfig 依赖 `CONFIG_KSU_MANUAL_HOOK`），因此上述内核侧显式调用点承担全部接入职责；ReSukiSU 构建时的 `inline_hook_check` / `susfs_compat` 校验也要求这些调用点存在。本树的 sus_su 相关 exec/devpts 钩子在 `CONFIG_KSU_SUSFS_SUS_SU` 守卫下保持死代码默认关闭。
+SUSFS 模式下 LSM 的 `AUTO_*` 自动接入不可用（其 Kconfig 依赖 `CONFIG_KSU_MANUAL_HOOK`），因此上述内核侧显式调用点承担全部接入职责；ReSukiSU 构建时的 `inline_hook_check` / `susfs_compat` 校验也要求这些调用点存在。v1.5.5 时期的 exec/devpts sus_su 钩子已随 v2.1.0 移除。
 
-`fs/namespace.c` 的 `alloc_vfsmnt` / `vfs_create_mount`、`include/linux/mount.h` 的 `susfs_mnt_id_backup`、`include/linux/sched.h` 的 `susfs_task_state` 等 KABI 字段扩展均由 susfs 补丁提供，`CONFIG_KSU_SUSFS` 关闭时保持原 KABI 布局。
+挂载相关接入位于 [`fs/namespace.c`](fs/namespace.c)（`mnt_alloc_group_id`、`mnt_free_id`、`vfs_create_mount`、`clone_mnt`、`copy_mnt_ns` 及 `susfs_get_non_sus_mnt_id_from_mnt` 等导出）、[`fs/statfs.c`](fs/statfs.c)、[`fs/proc/fd.c`](fs/proc/fd.c)、[`fs/proc_namespace.c`](fs/proc_namespace.c)、[`fs/notify/fdinfo.c`](fs/notify/fdinfo.c)；路径与 maps 隐藏位于 [`fs/namei.c`](fs/namei.c)、[`fs/readdir.c`](fs/readdir.c)、[`fs/proc/task_mmu.c`](fs/proc/task_mmu.c)；符号与日志伪装位于 [`kernel/kallsyms.c`](kernel/kallsyms.c)、[`fs/proc/cmdline.c`](fs/proc/cmdline.c)、[`security/selinux/avc.c`](security/selinux/avc.c)、[`kernel/sys.c`](kernel/sys.c)。所有改动均在对应 `CONFIG_KSU_SUSFS*` 守卫下，关闭时保持原 KABI 布局与行为。
 
 实际使用仍需要匹配的 ReSukiSU 用户空间组件 / 管理器，并验证授权、启动流程、策略及所用模块。本仓库虽带有管理器与用户空间源码，构建内核镜像并不等于已经构建或安装这些组件；Root 授权、应用兼容性、模块功能以及 SUSFS 隐藏行为均未完成目标设备实测。
 
 ### 与 SUSFS 的版本对应
 
-内核侧 SUSFS 采用 susfs4ksu `kernel-5.4` 分支的 `SUSFS_VERSION "v1.5.5"`（见 [`include/linux/susfs.h`](include/linux/susfs.h)）。上游 SUSFS 官方宣称内核侧最低支持 4.14，并在多个非 GKI 内核上得到社区维护；本树的集成基于厂商 5.4 代码的实际情况手动适配，**不代表与所有 QGKI 5.4 补丁集、目标 ROM 的厂商模块或 HyperOS 系统组件兼容已验证**。
+内核侧 SUSFS 采用 `SUSFS_VERSION "v2.1.0"`（见 [`include/linux/susfs.h`](include/linux/susfs.h)），命令号 ABI 与 ReSukiSU rc2 的 `dispatch.c` 要求对齐（含 `ADD_SUS_PATH_LOOP`、`HIDE_SUS_MNTS_FOR_NON_SU_PROCS`、`ENABLE_AVC_LOG_SPOOFING`、`ADD_SUS_MAP` 等新命令）。v2.1.0 内核侧官方支持 4.14+，本树集成以社区已适配 5.4 QGKI 的 v2.1.0 实现为基础逐文件移植，**不代表与所有 QGKI 5.4 补丁集、目标 ROM 的厂商模块或 HyperOS 系统组件兼容已验证**。
 
 ## 构建方法
 
