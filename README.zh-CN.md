@@ -1,3 +1,5 @@
+[English](README.md)
+
 # 小米 11 Ultra（star）内核 · Linux 5.4.274
 
 面向 **Xiaomi Mi 11 Ultra（小米 11 Ultra，代号 `star`）** 的 ARM64 / Qualcomm QGKI 内核源码，集成 ReSukiSU Root。适配目标为 **HyperOS 2.0.7.0 / Android 14**；这里的“目标”不代表已经完成该系统上的兼容性验证。
