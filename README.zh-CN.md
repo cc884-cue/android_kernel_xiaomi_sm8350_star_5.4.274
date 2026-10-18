@@ -161,7 +161,9 @@ make "${KMAKE[@]}" KCFLAGS="$KCFLAGS_COMPAT" \
 7cca4ca70700f3e91090676017f5c74b85f25bc08d2af39e2c9e3f1c4c42992b
 ```
 
-主要产物为 `$OUT/arch/arm64/boot/Image`、`$OUT/arch/arm64/boot/Image.gz`，并包含 `vmlinux`、`System.map` 等。上述为直接 Make 构建示例，不是完整 Android ROM 或 Recovery ZIP 的制作脚本；本次文档更新没有重新执行完整内核构建。
+主要产物为 `$OUT/arch/arm64/boot/Image`、`$OUT/arch/arm64/boot/Image.gz`，并包含 `vmlinux`、`System.map` 等。
+
+**release / vermagic 对齐**：`star_root.config` 将 `CONFIG_LOCALVERSION` 固定为原机 HyperOS 2.0.7.0 的后缀，并关闭 `CONFIG_LOCALVERSION_AUTO`；仓库根的空文件 `.scmversion` 防止 `scripts/setlocalversion` 追加 `+`。最终 `uname -r` 为 `5.4.274-qgki-g4dfe63e0666f`，与官方 ROM 一致，`vendor_dlkm` 模块的 vermagic 版本号部分可对齐（`CONFIG_MODVERSIONS` 的符号 CRC 仍可能因编译器/配置差异不完全一致，首次启动以 dmesg 的 insmod 结果为准）。
 
 ### 模块与设备树是额外步骤
 
@@ -176,6 +178,26 @@ make "${KMAKE[@]}" INSTALL_MOD_PATH="$OUT/modules-staging" modules_install
 这些是额外构建目标示例，**不能把已有 `Image.gz` 构建成功记录当作全部模块与 DTB / DTBO 已验证通过**。`modules_install` 只负责导出模块，不会替你完成 Android 分区打包或设备端加载配置。
 
 WLAN、指纹、触控、ToF、红外等 `m` 项需要匹配的 `.ko`、依赖及设备加载配置；还要核对目标 ROM 的固件、设备树、模块 ABI 和签名要求。内核镜像文件本身不是可直接通用刷入的完整启动镜像。
+
+## 真机刷入（Mi 11 Ultra star / HyperOS 2.0.7.0）
+
+内核旁挂 AnyKernel3 模板（见 [`anykernel3/`](anykernel3/)）产出卡刷包：
+
+```bash
+O="$OUT" PACKAGE_NAME="$RELEASE-resukisu-susfs" ./anykernel3/build.sh
+# -> $OUT/5.4.274-qgki-g4dfe63e0666f-resukisu-susfs.zip
+```
+
+该包为**纯内核替换**（`split_boot` / `flash_boot`）：保留原 ramdisk / dtb / dtbo，A/B 双分区，`PATCH_VBMETA_FLAG=auto`，设备检查仅接受 `star` / `mars`。
+
+测试步骤（需已解锁 BL）：
+
+1. 备份原 boot.img（`dd` 或 TWRP 备份）。
+2. 首选用 Recovery（TWRP）刷入 zip；或 `fastboot boot` 临时引导（需自行用 magiskboot/mkbootimg 把 `Image.gz` 与原机 boot 的 ramdisk、dtb 重打包）。
+3. 开机后安装与内核 ABI 匹配的 ReSukiSU **v4.2.0-rc2 官方管理器 APK**（本仓库 `KernelSU/manager` 为对应源码），在管理器内确认 SUSFS 各功能开关。
+4. 若模块 CRC 不匹配导致外设异常（dmesg 可见 `disagrees about version of symbol` / `Invalid module format`），回退原 boot 镜像，再决定是否随包替换 `vendor_dlkm` 模块或内建关键驱动。
+
+已知范围：本树未做 5.10 BPF backport（参考树 venus-5.10bpf 系有），Android 14 官方 HyperOS 不依赖它；不要据此镜像直接上 Android 15+ / HyperOS 4 的包。
 
 ## 已验证什么，还缺什么
 
