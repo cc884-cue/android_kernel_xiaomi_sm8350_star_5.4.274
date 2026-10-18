@@ -59,19 +59,32 @@
 
 [`drivers/kernelsu`](drivers/kernelsu) 链接到 `KernelSU/kernel`。[`drivers/Kconfig`](drivers/Kconfig) 引入其配置，[`drivers/Makefile`](drivers/Makefile) 按 `CONFIG_KSU` 纳入构建。`star_root.config` 使用 `CONFIG_KSU=y`，因此本配置是**内核内建 Root**，不是仅安装管理器 APK，也不是选择运行时加载的 Root 内核模块。
 
-### Linux 5.4 manual hooks
+### Linux 5.4 钩子：SUSFS 内联钩子模式
 
 本配置启用：
 
 ```text
 CONFIG_KSU=y
-CONFIG_KSU_MANUAL_HOOK=y
-CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
-CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
-CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
+CONFIG_KSU_SUSFS=y
+CONFIG_KSU_SUSFS_SUS_PATH=y
+CONFIG_KSU_SUSFS_SUS_MOUNT=y
+CONFIG_KSU_SUSFS_SUS_KSTAT=y
+CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+CONFIG_KSU_SUSFS_ENABLE_LOG=y
+CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+CONFIG_KSU_SUSFS_SUS_MAP=y
 ```
 
-在 `CONFIG_KSU_MANUAL_HOOK` 条件下，内核已有显式调用点：
+ReSukiSU 钩子方式为 `choice` 单选，本配置选择 **`KSU_SUSFS`（SUSFS 内联钩子）**，替代此前的 `CONFIG_KSU_MANUAL_HOOK` 组合。内核侧集成了 [`gitlab.com/simonpunk/susfs4ksu`](https://gitlab.com/simonpunk/susfs4ksu) `kernel-5.4` 分支的 `50_add_susfs_in_kernel-5.4.patch`（针对本树手动适配的部分见提交记录），新增内核文件：
+
+| 文件 | 说明 |
+| --- | --- |
+| [`fs/susfs.c`](fs/susfs.c) · [`include/linux/susfs.h`](include/linux/susfs.h) · [`include/linux/susfs_def.h`](include/linux/susfs_def.h) | SUSFS 核心（sus mount、sus kstat、sus path、uname / cmdline 伪装等） |
+| [`fs/sus_su.c`](fs/sus_su.c) · [`include/linux/sus_su.h`](include/linux/sus_su.h) | sus_su 工具侧代码；`CONFIG_KSU_SUSFS_SUS_SU` 不在 ReSukiSU 的 Kconfig 菜单中，保持关闭 |
+
+内核已有的显式调用点（SUSFS 模式下改为 `CONFIG_KSU` 守卫，suid / initrc / input 三处为新加，`CONFIG_KSU_SUSFS` 守卫）：
 
 | 路径 | 接入内容 |
 | --- | --- |
@@ -79,16 +92,19 @@ CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
 | [`fs/open.c`](fs/open.c) | 在 `faccessat` 的访问检查前调用处理函数 |
 | [`fs/stat.c`](fs/stat.c) | 接入 `newfstatat` / `fstatat64` 的路径处理，以及 `newfstat` / `fstat64` 的返回处理 |
 | [`kernel/reboot.c`](kernel/reboot.c) | 接入 ReSukiSU 约定的 reboot 扩展处理入口 |
+| [`kernel/sys.c`](kernel/sys.c) | `setresuid` 处理（替代 manual 模式的 LSM 自动接入） |
+| [`fs/read_write.c`](fs/read_write.c) | `read` 的 init rc 处理（替代 manual 模式的 LSM 自动接入） |
+| [`drivers/input/input.c`](drivers/input/input.c) | 输入事件处理（替代 manual 模式的 `input_handler` 自动接入） |
 
-根据 [`KernelSU/kernel/Kconfig`](KernelSU/kernel/Kconfig)，三个 `AUTO_*` 选项分别使用 LSM 方式接入 setuid、init rc 相关处理，以及通过 `input_handler` 接入输入事件处理。manual hooks 与这些自动接入选项共同组成当前配置的集成方式，不能把它简化成“所有 hook 都是手工改同一个 syscall”或“所有功能都已验证”。
+SUSFS 模式下 LSM 的 `AUTO_*` 自动接入不可用（其 Kconfig 依赖 `CONFIG_KSU_MANUAL_HOOK`），因此上述内核侧显式调用点承担全部接入职责；ReSukiSU 构建时的 `inline_hook_check` / `susfs_compat` 校验也要求这些调用点存在。本树的 sus_su 相关 exec/devpts 钩子在 `CONFIG_KSU_SUSFS_SUS_SU` 守卫下保持死代码默认关闭。
 
-实际使用仍需要匹配的 ReSukiSU 用户空间组件 / 管理器，并验证授权、启动流程、策略及所用模块。本仓库虽带有管理器与用户空间源码，构建内核镜像并不等于已经构建或安装这些组件；Root 授权、应用兼容性及模块功能均未完成目标设备实测。
+`fs/namespace.c` 的 `alloc_vfsmnt` / `vfs_create_mount`、`include/linux/mount.h` 的 `susfs_mnt_id_backup`、`include/linux/sched.h` 的 `susfs_task_state` 等 KABI 字段扩展均由 susfs 补丁提供，`CONFIG_KSU_SUSFS` 关闭时保持原 KABI 布局。
 
-### 未集成 SUSFS v2.1.0
+实际使用仍需要匹配的 ReSukiSU 用户空间组件 / 管理器，并验证授权、启动流程、策略及所用模块。本仓库虽带有管理器与用户空间源码，构建内核镜像并不等于已经构建或安装这些组件；Root 授权、应用兼容性、模块功能以及 SUSFS 隐藏行为均未完成目标设备实测。
 
-**当前内核树未集成 SUSFS v2.1.0 的内核补丁，当前 Root 配置也未启用 SUSFS。** 生成配置中为 `# CONFIG_KSU_SUSFS is not set`；没有 `fs/susfs.c`、`include/linux/susfs.h` 等对应内核实现文件。
+### 与 SUSFS 的版本对应
 
-ReSukiSU 自带的源码中确实有 SUSFS 条件接口、兼容脚本和管理器 / 用户空间相关代码，但这些代码的存在不等于底层 SUSFS 补丁已经集成。本版本不以此宣称隐藏或完整性检查绕过能力。
+内核侧 SUSFS 采用 susfs4ksu `kernel-5.4` 分支的 `SUSFS_VERSION "v1.5.5"`（见 [`include/linux/susfs.h`](include/linux/susfs.h)）。上游 SUSFS 官方宣称内核侧最低支持 4.14，并在多个非 GKI 内核上得到社区维护；本树的集成基于厂商 5.4 代码的实际情况手动适配，**不代表与所有 QGKI 5.4 补丁集、目标 ROM 的厂商模块或 HyperOS 系统组件兼容已验证**。
 
 ## 构建方法
 
