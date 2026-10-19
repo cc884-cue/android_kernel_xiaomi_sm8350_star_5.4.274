@@ -59,36 +59,58 @@
 
 [`drivers/kernelsu`](drivers/kernelsu) 链接到 `KernelSU/kernel`。[`drivers/Kconfig`](drivers/Kconfig) 引入其配置，[`drivers/Makefile`](drivers/Makefile) 按 `CONFIG_KSU` 纳入构建。`star_root.config` 使用 `CONFIG_KSU=y`，因此本配置是**内核内建 Root**，不是仅安装管理器 APK，也不是选择运行时加载的 Root 内核模块。
 
-### Linux 5.4 manual hooks
+### Linux 5.4 钩子：SUSFS 内联钩子模式
 
 本配置启用：
 
 ```text
 CONFIG_KSU=y
-CONFIG_KSU_MANUAL_HOOK=y
-CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
-CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
-CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
+CONFIG_KSU_SUSFS=y
+CONFIG_KSU_SUSFS_SUS_PATH=y
+CONFIG_KSU_SUSFS_SUS_MOUNT=y
+CONFIG_KSU_SUSFS_SUS_KSTAT=y
+CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+CONFIG_KSU_SUSFS_ENABLE_LOG=y
+CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+CONFIG_KSU_SUSFS_SUS_MAP=y
 ```
 
-在 `CONFIG_KSU_MANUAL_HOOK` 条件下，内核已有显式调用点：
+ReSukiSU 钩子方式为 `choice` 单选，本配置选择 **`KSU_SUSFS`（SUSFS 内联钩子）**，替代此前的 `CONFIG_KSU_MANUAL_HOOK` 组合。内核侧集成 SUSFS **`v2.1.0`**（`fs/susfs.c` 与 `include/linux/susfs.h` 中 `SUSFS_VERSION` 为准），以参考树 v2.1.0 完整实现为蓝本，针对本 5.4.274 QGKI 树逐文件适配；新增内核文件：
+
+| 文件 | 说明 |
+| --- | --- |
+| [`fs/susfs.c`](fs/susfs.c) · [`include/linux/susfs.h`](include/linux/susfs.h) · [`include/linux/susfs_def.h`](include/linux/susfs_def.h) | SUSFS v2.1.0 核心（sus mount / kstat / path / map / open redirect、uname / cmdline 伪装、avc log 伪装、ksu domain 挂载隔离等） |
+
+相对 v1.5.5 的主要结构变化（沿用上游 v2.1.0 设计）：
+
+- 移除 sus_su（`fs/sus_su.c` 等），不再挂 devpts su 特殊文件；
+- 进程状态改用线程标志位（`TIF_PROC_NO_SU` / `TIF_PROC_UMOUNTED`，见 `include/linux/susfs_def.h`），不再扩展 `task_struct` KABI 字段；
+- sus mount 伪装改由 `susfs_alloc_unshare_ksu_vfsmnt` / `susfs_alloc_non_unshare_ksu_vfsmnt` 的假 `mnt_id`（从 `DEFAULT_KSU_MNT_ID=500000` 起）方案承担，不再备份 KABI 字段；
+- 新增 `SUSFS_SUS_MAP`（vMA 正文伪装）、`SUSFS_OPEN_REDIRECT`、`HIDE_SUS_MNTS_FOR_NON_SU_PROCS`、`AVC_LOG_SPOOFING` 等 ReSukiSU rc2 依赖的命令集。
+
+内核侧 ReSukiSU 显式调用点（v2.1.0 风格，`CONFIG_KSU` / `CONFIG_KSU_SUSFS` 守卫）：
 
 | 路径 | 接入内容 |
 | --- | --- |
-| [`fs/exec.c`](fs/exec.c) | 在 exec 执行前后调用 ReSukiSU 的处理函数 |
-| [`fs/open.c`](fs/open.c) | 在 `faccessat` 的访问检查前调用处理函数 |
-| [`fs/stat.c`](fs/stat.c) | 接入 `newfstatat` / `fstatat64` 的路径处理，以及 `newfstat` / `fstat64` 的返回处理 |
-| [`kernel/reboot.c`](kernel/reboot.c) | 接入 ReSukiSU 约定的 reboot 扩展处理入口 |
+| [`fs/exec.c`](fs/exec.c) | execve 经 `ksu_su_compat_enabled` 静态键分流 `ksu_handle_execveat` / `ksu_handle_execveat_sucompat` |
+| [`fs/open.c`](fs/open.c) | `do_faccessat` 路径处理（allow uid 时经 `ksu_su_compat_enabled` 分流） |
+| [`fs/stat.c`](fs/stat.c) | `vfs_statx` 路径处理 + `vfs_statx_fd` 的 `ksu_handle_vfs_fstat`（kstat 大小伪装） |
+| [`kernel/reboot.c`](kernel/reboot.c) | ReSukiSU 约定的 reboot 扩展处理入口（magic 返回） |
+| [`kernel/sys.c`](kernel/sys.c) | `setresuid` 处理（替代 manual 模式的 LSM 自动接入） |
+| [`fs/read_write.c`](fs/read_write.c) | `read` 的 init rc 处理（`ksu_is_init_rc_hook_enabled` 静态键） |
+| [`drivers/input/input.c`](drivers/input/input.c) | 输入事件处理（`ksu_is_input_hook_enabled` 静态键） |
 
-根据 [`KernelSU/kernel/Kconfig`](KernelSU/kernel/Kconfig)，三个 `AUTO_*` 选项分别使用 LSM 方式接入 setuid、init rc 相关处理，以及通过 `input_handler` 接入输入事件处理。manual hooks 与这些自动接入选项共同组成当前配置的集成方式，不能把它简化成“所有 hook 都是手工改同一个 syscall”或“所有功能都已验证”。
+SUSFS 模式下 LSM 的 `AUTO_*` 自动接入不可用（其 Kconfig 依赖 `CONFIG_KSU_MANUAL_HOOK`），因此上述内核侧显式调用点承担全部接入职责；ReSukiSU 构建时的 `inline_hook_check` / `susfs_compat` 校验也要求这些调用点存在。v1.5.5 时期的 exec/devpts sus_su 钩子已随 v2.1.0 移除。
 
-实际使用仍需要匹配的 ReSukiSU 用户空间组件 / 管理器，并验证授权、启动流程、策略及所用模块。本仓库虽带有管理器与用户空间源码，构建内核镜像并不等于已经构建或安装这些组件；Root 授权、应用兼容性及模块功能均未完成目标设备实测。
+挂载相关接入位于 [`fs/namespace.c`](fs/namespace.c)（`mnt_alloc_group_id`、`mnt_free_id`、`vfs_create_mount`、`clone_mnt`、`copy_mnt_ns` 及 `susfs_get_non_sus_mnt_id_from_mnt` 等导出）、[`fs/statfs.c`](fs/statfs.c)、[`fs/proc/fd.c`](fs/proc/fd.c)、[`fs/proc_namespace.c`](fs/proc_namespace.c)、[`fs/notify/fdinfo.c`](fs/notify/fdinfo.c)；路径与 maps 隐藏位于 [`fs/namei.c`](fs/namei.c)、[`fs/readdir.c`](fs/readdir.c)、[`fs/proc/task_mmu.c`](fs/proc/task_mmu.c)；符号与日志伪装位于 [`kernel/kallsyms.c`](kernel/kallsyms.c)、[`fs/proc/cmdline.c`](fs/proc/cmdline.c)、[`security/selinux/avc.c`](security/selinux/avc.c)、[`kernel/sys.c`](kernel/sys.c)。所有改动均在对应 `CONFIG_KSU_SUSFS*` 守卫下，关闭时保持原 KABI 布局与行为。
 
-### 未集成 SUSFS v2.1.0
+实际使用仍需要匹配的 ReSukiSU 用户空间组件 / 管理器，并验证授权、启动流程、策略及所用模块。本仓库虽带有管理器与用户空间源码，构建内核镜像并不等于已经构建或安装这些组件；Root 授权、应用兼容性、模块功能以及 SUSFS 隐藏行为均未完成目标设备实测。
 
-**当前内核树未集成 SUSFS v2.1.0 的内核补丁，当前 Root 配置也未启用 SUSFS。** 生成配置中为 `# CONFIG_KSU_SUSFS is not set`；没有 `fs/susfs.c`、`include/linux/susfs.h` 等对应内核实现文件。
+### 与 SUSFS 的版本对应
 
-ReSukiSU 自带的源码中确实有 SUSFS 条件接口、兼容脚本和管理器 / 用户空间相关代码，但这些代码的存在不等于底层 SUSFS 补丁已经集成。本版本不以此宣称隐藏或完整性检查绕过能力。
+内核侧 SUSFS 采用 `SUSFS_VERSION "v2.1.0"`（见 [`include/linux/susfs.h`](include/linux/susfs.h)），命令号 ABI 与 ReSukiSU rc2 的 `dispatch.c` 要求对齐（含 `ADD_SUS_PATH_LOOP`、`HIDE_SUS_MNTS_FOR_NON_SU_PROCS`、`ENABLE_AVC_LOG_SPOOFING`、`ADD_SUS_MAP` 等新命令）。v2.1.0 内核侧官方支持 4.14+，本树集成以社区已适配 5.4 QGKI 的 v2.1.0 实现为基础逐文件移植，**不代表与所有 QGKI 5.4 补丁集、目标 ROM 的厂商模块或 HyperOS 系统组件兼容已验证**。
 
 ## 构建方法
 
@@ -139,7 +161,9 @@ make "${KMAKE[@]}" KCFLAGS="$KCFLAGS_COMPAT" \
 7cca4ca70700f3e91090676017f5c74b85f25bc08d2af39e2c9e3f1c4c42992b
 ```
 
-主要产物为 `$OUT/arch/arm64/boot/Image`、`$OUT/arch/arm64/boot/Image.gz`，并包含 `vmlinux`、`System.map` 等。上述为直接 Make 构建示例，不是完整 Android ROM 或 Recovery ZIP 的制作脚本；本次文档更新没有重新执行完整内核构建。
+主要产物为 `$OUT/arch/arm64/boot/Image`、`$OUT/arch/arm64/boot/Image.gz`，并包含 `vmlinux`、`System.map` 等。
+
+**release / vermagic 对齐**：`star_root.config` 将 `CONFIG_LOCALVERSION` 固定为原机 HyperOS 2.0.7.0 的后缀，并关闭 `CONFIG_LOCALVERSION_AUTO`；仓库根的空文件 `.scmversion` 防止 `scripts/setlocalversion` 追加 `+`。最终 `uname -r` 为 `5.4.274-qgki-g4dfe63e0666f`，与官方 ROM 一致，`vendor_dlkm` 模块的 vermagic 版本号部分可对齐（`CONFIG_MODVERSIONS` 的符号 CRC 仍可能因编译器/配置差异不完全一致，首次启动以 dmesg 的 insmod 结果为准）。
 
 ### 模块与设备树是额外步骤
 
@@ -154,6 +178,26 @@ make "${KMAKE[@]}" INSTALL_MOD_PATH="$OUT/modules-staging" modules_install
 这些是额外构建目标示例，**不能把已有 `Image.gz` 构建成功记录当作全部模块与 DTB / DTBO 已验证通过**。`modules_install` 只负责导出模块，不会替你完成 Android 分区打包或设备端加载配置。
 
 WLAN、指纹、触控、ToF、红外等 `m` 项需要匹配的 `.ko`、依赖及设备加载配置；还要核对目标 ROM 的固件、设备树、模块 ABI 和签名要求。内核镜像文件本身不是可直接通用刷入的完整启动镜像。
+
+## 真机刷入（Mi 11 Ultra star / HyperOS 2.0.7.0）
+
+内核旁挂 AnyKernel3 模板（见 [`anykernel3/`](anykernel3/)）产出卡刷包：
+
+```bash
+O="$OUT" PACKAGE_NAME="$RELEASE-resukisu-susfs" ./anykernel3/build.sh
+# -> $OUT/5.4.274-qgki-g4dfe63e0666f-resukisu-susfs.zip
+```
+
+该包为**纯内核替换**（`split_boot` / `flash_boot`）：保留原 ramdisk / dtb / dtbo，A/B 双分区，`PATCH_VBMETA_FLAG=auto`，设备检查仅接受 `star` / `mars`。
+
+测试步骤（需已解锁 BL）：
+
+1. 备份原 boot.img（`dd` 或 TWRP 备份）。
+2. 首选用 Recovery（TWRP）刷入 zip；或 `fastboot boot` 临时引导（需自行用 magiskboot/mkbootimg 把 `Image.gz` 与原机 boot 的 ramdisk、dtb 重打包）。
+3. 开机后安装与内核 ABI 匹配的 ReSukiSU **v4.2.0-rc2 官方管理器 APK**（本仓库 `KernelSU/manager` 为对应源码），在管理器内确认 SUSFS 各功能开关。
+4. 若模块 CRC 不匹配导致外设异常（dmesg 可见 `disagrees about version of symbol` / `Invalid module format`），回退原 boot 镜像，再决定是否随包替换 `vendor_dlkm` 模块或内建关键驱动。
+
+已知范围：本树未做 5.10 BPF backport（参考树 venus-5.10bpf 系有），Android 14 官方 HyperOS 不依赖它；不要据此镜像直接上 Android 15+ / HyperOS 4 的包。
 
 ## 已验证什么，还缺什么
 

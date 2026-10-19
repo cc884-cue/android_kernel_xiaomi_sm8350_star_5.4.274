@@ -19,6 +19,7 @@
 #include <linux/slab.h>
 #include <linux/compiler.h>
 #include <linux/pstore_ram.h>
+#include <linux/memblock.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <soc/qcom/minidump.h>
@@ -1021,6 +1022,58 @@ static void __init ramoops_register_dummy(void)
 		ramoops_unregister_dummy();
 	}
 }
+
+#ifdef CONFIG_PSTORE_RAM
+/*
+ * Xiaomi/Qualcomm QGKI ramoops flow: the bootloader/OS cmdline carries
+ * "ramoops_memreserve=4M" which must be reserved at a fixed address so the
+ * region survives warm reboots and can later be read back by the next
+ * boot (recovery / another kernel). Port of the upstream Xiaomi patch
+ * gated on CONFIG_MACH_XIAOMI_SM8150 in their branches.
+ */
+static struct ramoops_platform_data ramoops_data;
+
+static struct platform_device ramoops_dev = {
+	.name = "ramoops",
+	.dev = {
+		.platform_data = &ramoops_data,
+	},
+};
+
+static int __init ramoops_memreserve(char *p)
+{
+	unsigned long size;
+
+	if (!p)
+		return 1;
+
+	size = memparse(p, &p) & PAGE_MASK;
+	ramoops_data.mem_size = size;
+	ramoops_data.mem_address = 0xB0000000;
+	ramoops_data.console_size = size / 2;
+	ramoops_data.pmsg_size = size / 2;
+	ramoops_data.dump_oops = 1;
+
+	pr_info("msm_reserve_ramoops_memory addr=%llx,size=%lx\n",
+		ramoops_data.mem_address, ramoops_data.mem_size);
+	pr_info("msm_reserve_ramoops_memory record_size=%lx,ftrace_size=%lx\n",
+		ramoops_data.record_size, ramoops_data.ftrace_size);
+
+	memblock_reserve(ramoops_data.mem_address, ramoops_data.mem_size);
+
+	return 0;
+}
+early_param("ramoops_memreserve", ramoops_memreserve);
+
+static int __init msm_register_ramoops_device(void)
+{
+	pr_info("msm_register_ramoops_device\n");
+	if (platform_device_register(&ramoops_dev))
+		pr_info("Unable to register ramoops platform device\n");
+	return 0;
+}
+core_initcall(msm_register_ramoops_device);
+#endif
 
 static int __init ramoops_init(void)
 {
