@@ -10,12 +10,16 @@
 # Normal rules (sorted alphabetically)
 #
 .*
-*.a
+!.github/
+!.gitignore
+1*.a
 *.asn1.[ch]
 *.bin
 *.bz2
 *.c.[012]*.*
-*.dt.yaml
+!.github/
+!.gitignore
+1*.dt.yaml
 *.dtb
 *.dtb.S
 *.dwo
@@ -35,7 +39,9 @@
 *.ns_deps
 *.o
 *.o.*
-*.patch
+!.github/
+!.gitignore
+1*.patch
 *.s
 *.so
 *.so.dbg
@@ -85,6 +91,7 @@ modules.order
 #
 # We don't want to ignore the following even if they are dot-files
 #
+!.github/
 !.clang-format
 !.cocciconfig
 !.get_maintainer.ignore
@@ -109,8 +116,12 @@ series
 
 # cscope files
 cscope.*
-ncscope.*
-
+!.github/
+!.gitignore
+1ncscope.*
+!.github/
+!.gitignore
+1
 # gnu global files
 GPATH
 GRTAGS

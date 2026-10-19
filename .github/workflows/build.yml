@@ -1,0 +1,44 @@
+name: kernel build
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', 'anykernel3/**', '.github/**']
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        fetch-depth: 1
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-18 lld-18 llvm-18 bison flex bc libelf-dev libssl-dev python3 zip ccache
+      - name: Generate config
+        run: |
+          export PATH=/usr/lib/llvm-18/bin:$PATH
+          O=$PWD/out
+          make O=$O ARCH=arm64 vendor/lahaina-qgki_defconfig
+          scripts/kconfig/merge_config.sh -m -O $O $O/.config \
+            arch/arm64/configs/vendor/star_QGKI.config \
+            arch/arm64/configs/vendor/star_root.config \
+            arch/arm64/configs/vendor/star_stock_align.config
+          make O=$O ARCH=arm64 olddefconfig
+          REL="$(make -s O=$O ARCH=arm64 kernelrelease 2>/dev/null)"
+          echo "release=$REL" | tee release.txt
+          test "$REL" = "5.4.274-qgki-g4dfe63e0666f"
+      - name: Build Image.gz, modules, dtbs
+        run: |
+          export PATH=/usr/lib/llvm-18/bin:$PATH
+          KCFLAGS="-Wno-pointer-to-enum-cast -Wno-unaligned-access -Wno-cast-function-type-strict -Wno-enum-compare-conditional -Wno-enum-enum-conversion"
+          O=$PWD/out
+          make O=$O ARCH=arm64 LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- \
+            KCFLAGS="$KCFLAGS" -j"$(nproc)" Image.gz modules dtbs
+      - name: Package AnyKernel3 zip
+        run: O=$PWD/out PACKAGE_NAME=star-resukisu-susfs-ci bash anykernel3/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: star-resukisu-susfs-ci
+          path: |
+            out/star-resukisu-susfs-ci.zip
+            release.txt
+          retention-days: 30
