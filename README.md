@@ -182,3 +182,37 @@ Add the following code before the last line of this file
 
         CONFIG_HID_AKSYS_QRD=m
         CONFIG_AKSYS_QRD_FF=y
+
+---
+
+# Project status (susfs-integration branch)
+
+Goal: SUSFS root-hiding kernel for Xiaomi Mi 11 Ultra (star) running stock
+HyperOS 2.0.7.0 (Android 14, stock kernel `5.4.274-qgki-g4dfe63e0666f`),
+with KernelSU (ReSukiSU rc2) support.
+
+## What is done
+
+- SUSFS v2.1.0 core integrated + ReSukiSU rc2 hooks, builds clean.
+- Anykernel3 flashable zips (`anykernel3/build.sh`) published on the
+  [releases page](https://github.com/dundwv/android_kernel_xiaomi_sm8350_star_5.4.274/releases/tag/susfs-test1).
+- Stock Xiaomi ramoops/pstore reservation ported (`fs/pstore/ram.c`) so the
+  `ramoops_memreserve=4M` cmdline actually reserves console-ramoops storage.
+- Root cause of the black screen identified (see
+  [docs/vendor-module-crc-analysis.md](docs/vendor-module-crc-analysis.md)):
+  stock vendor modules (`/vendor/lib/modules/5.4-gki/*.ko`) can never load into
+  any rebuildable kernel because their symbol CRCs are anchored in Xiaomi's
+  private (unpublished) kernel sources - measured match rate <=45% for every
+  publicly obtainable base, including full official 5.4.61 OSS with the exact
+  stock `.config`.
+  Display (`msm_drm.ko`) is therefore now built **into the kernel**
+  (`CONFIG_DISPLAY_BUILD=y` in `techpack/display/config/lahainadisp.conf`).
+
+## Next steps
+
+- Device test of display-builtin build (`5.4.274-susfs-dispint.zip` on the release page).
+- If boot OK: bake WLAN/audio/camera into the kernel the same way (sources for
+  all of them are in-tree; techpack audio/camera + qca_cld3_wlan already build
+  as self-consistent modules).
+- pstore capture path stays available for any remaining boot failure forensics.
+
