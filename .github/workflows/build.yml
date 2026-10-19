@@ -2,7 +2,11 @@ name: kernel build
 on:
   push:
     branches: [main]
-    paths-ignore: ['**.md', 'docs/**', 'anykernel3/**', '.github/**']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'anykernel3/**'
+      - '.github/workflows/build.yml'
   pull_request:
   workflow_dispatch:
 jobs:
@@ -10,7 +14,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        fetch-depth: 1
+        with:
+          fetch-depth: 1
       - name: Install toolchain
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang-18 lld-18 llvm-18 bison flex bc libelf-dev libssl-dev python3 zip ccache
       - name: Generate config
