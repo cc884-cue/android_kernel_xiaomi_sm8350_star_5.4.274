@@ -37,3 +37,18 @@
 - `/vendor/lib/modules/`：**112 个** `.ko`，vermagic `5.4.274-qgki-g4dfe63e0666f`，`modules.load` 112 条 —— 这是 ROM 实机**真正加载**的集合（此前分析的 226 个属 `5.4-gki/` 旧集，vermagic 无 `-qgki`，ROM 不加载）。
 - 结论不变：vermagic 版本部分与官方 release 一致，但 CRC 仍锚定私有树（官方构建提交 `4dfe63e0666f`、toolchain `clang 11.0.2`），公开源码树无法对齐。运行时以 `dmesg` 的 insmod 结果为最终判据。
 - vendor 模块完整清单与 vermagic 表见 [`firmware-notes.md`](firmware-notes.md)；内核配置侧的官方对齐分析见 [`stock-config-delta.md`](stock-config-delta.md)。
+
+## 2026-10 构建认证复测（本仓库 clang 18.1.3, star_stock_align 配置）
+
+用本仓库完整构建(见 [构建认证](build-cert-2026-10.md))的 `Module.symvers` 重测官方实机包(OTA vendor,EROFS)112 个在用模块的代表性样本:
+
+| 官方模块(vermagic 5.4.274-qgki-g4dfe63e0666f) | MATCH | DIFF | MISSING | 兼容率 |
+| --- | --- | --- | --- | --- |
+| leds-qti-flash.ko | 14 | 31 | 1 | 30% |
+| cyttsp5_i2c.ko | 5 | 12 | 1 | 28% |
+| qti_battery_charger_main.ko | 47 | 34 | 3 | 56% |
+| stmvl53l5.ko | 15 | 17 | 1 | 46% |
+| ir-spi.ko | 15 | 11 | 1 | 56% |
+| qca_cld3_wlan.ko | 215 | 261 | 4 | 44% |
+
+结论维持不变:**任何公开基底(含本树 + 官方配置对齐)都无法让官方 vendor 模块原样加载**,全体 ≤56%,不含私有导出符号。验证了按效果内建(display 内建已交付;WLAN/audio/camera 内建为后续步骤)是唯一路线;厂商模块复用选项关闭。
