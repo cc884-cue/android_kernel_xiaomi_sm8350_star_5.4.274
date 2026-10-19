@@ -16,8 +16,9 @@
 | 架构与基线 | ARM64，Qualcomm QGKI；顶层 [Makefile](Makefile) 标记 Linux `5.4.274` |
 | 基础配置 | [`vendor/lahaina-qgki_defconfig`](arch/arm64/configs/vendor/lahaina-qgki_defconfig) |
 | 设备配置片段 | [`vendor/star_QGKI.config`](arch/arm64/configs/vendor/star_QGKI.config) |
-| Root 配置片段 | [`vendor/star_root.config`](arch/arm64/configs/vendor/star_root.config) |
-| 合并顺序 | `lahaina-qgki_defconfig` → `star_QGKI.config` → `star_root.config` → `olddefconfig` |
+| Root 配置片段 | [`vendor/star_root.config`](arch/arm64/configs/vendor/star_root.config)（无 Root 变体：[`vendor/star_root_noksu.config`](arch/arm64/configs/vendor/star_root_noksu.config)） |
+| 官方对齐片段 | [`vendor/star_stock_align.config`](arch/arm64/configs/vendor/star_stock_align.config)（依据 [`docs/stock-config-delta.md`](docs/stock-config-delta.md) 的官方配置差分） |
+| 合并顺序 | `lahaina-qgki_defconfig` → `star_QGKI.config` → `star_root.config` → `star_stock_align.config` → `olddefconfig` |
 | 版本后缀 | 保留基础配置的 `-qgki`；当前配置生成的 `kernelrelease` 为 `5.4.274-qgki` |
 
 保留版本后缀并不意味着与任意 ROM 的内核 ABI、外部模块或厂商固件自动兼容。
@@ -143,9 +144,11 @@ make "${KMAKE[@]}" vendor/lahaina-qgki_defconfig
 scripts/kconfig/merge_config.sh -m -O "$OUT" \
   "$OUT/.config" \
   arch/arm64/configs/vendor/star_QGKI.config \
-  arch/arm64/configs/vendor/star_root.config
+  arch/arm64/configs/vendor/star_root.config \
+  arch/arm64/configs/vendor/star_stock_align.config
 make "${KMAKE[@]}" olddefconfig
 make -s "${KMAKE[@]}" kernelrelease
+# 应输出 5.4.274-qgki-g4dfe63e0666f
 
 # Clang 18 兼容告警参数；与配置生成无关。
 KCFLAGS_COMPAT="-Wno-pointer-to-enum-cast -Wno-unaligned-access \
@@ -218,8 +221,13 @@ O="$OUT" PACKAGE_NAME="$RELEASE-resukisu-susfs" ./anykernel3/build.sh
 
 | 路径 | 内容 |
 | --- | --- |
-| [docs/firmware-notes.md](docs/firmware-notes.md) | 参考固件包（HyperOS 2.0.7.0）及其 boot 产物说明 |
+| [docs/stock-config-delta.md](docs/stock-config-delta.md) | 官方内核配置差分分析（IKCONFIG 提取 + `star_stock_align.config` 对齐结论） |
+| [docs/stock-kernel-config-OS2.0.7.0.txt](docs/stock-kernel-config-OS2.0.7.0.txt) | 官方内核 `.config` 存档（仅参考，不可直接构建） |
+| [docs/vendor-module-crc-analysis.md](docs/vendor-module-crc-analysis.md) | vendor 模块 CRC 分析与黑屏根因 |
+| [docs/module-crc-check.py](docs/module-crc-check.py) | CRC 兼容率测量工具 |
+| [docs/firmware-notes.md](docs/firmware-notes.md) | 参考固件包（HyperOS 2.0.7.0）及其 boot/vendor 产物说明 |
 | [scripts/unpack_firmware.sh](scripts/unpack_firmware.sh) | OTA payload 解包辅助脚本 |
+| [anykernel3/](anykernel3/) | AnyKernel3 卡刷包模板与构建脚本 |
 | [docs/upstream-patch-policy.md](docs/upstream-patch-policy.md) | 保留的 Android Common Kernels 上游补丁政策 |
 
 ## 源码与许可证

@@ -29,3 +29,11 @@
 ## 复现工具
 
 `module-crc-check.py`(本目录):解析 `.ko` 的 `__versions` 表(`struct modversion_info`:aarch64 上 crc 为 `u64` + 56 字节符号名),与 `Module.symvers` 数值化比对,输出 MATCH/DIFF/MISSING 分类。
+
+## 2026-10 复核（官方 OTA 实机包）
+
+改用卡刷 OTA 包（`star-ota_full-OS2.0.7.0.UKACNXM`，payload → EROFS vendor.img）复核官方模块清单：
+
+- `/vendor/lib/modules/`：**112 个** `.ko`，vermagic `5.4.274-qgki-g4dfe63e0666f`，`modules.load` 112 条 —— 这是 ROM 实机**真正加载**的集合（此前分析的 226 个属 `5.4-gki/` 旧集，vermagic 无 `-qgki`，ROM 不加载）。
+- 结论不变：vermagic 版本部分与官方 release 一致，但 CRC 仍锚定私有树（官方构建提交 `4dfe63e0666f`、toolchain `clang 11.0.2`），公开源码树无法对齐。运行时以 `dmesg` 的 insmod 结果为最终判据。
+- vendor 模块完整清单与 vermagic 表见 [`firmware-notes.md`](firmware-notes.md)；内核配置侧的官方对齐分析见 [`stock-config-delta.md`](stock-config-delta.md)。

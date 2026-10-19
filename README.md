@@ -34,7 +34,8 @@ Goal: SUSFS root-hiding kernel for the Mi 11 Ultra (star) on stock HyperOS 2.0.7
 | Base defconfig | [`vendor/lahaina-qgki_defconfig`](arch/arm64/configs/vendor/lahaina-qgki_defconfig) |
 | Device fragment | [`vendor/star_QGKI.config`](arch/arm64/configs/vendor/star_QGKI.config) |
 | Root fragment | [`vendor/star_root.config`](arch/arm64/configs/vendor/star_root.config) (no-root variant: [`vendor/star_root_noksu.config`](arch/arm64/configs/vendor/star_root_noksu.config)) |
-| Merge order | `lahaina-qgki_defconfig` → `star_QGKI.config` → `star_root.config` → `olddefconfig` |
+| Stock-alignment fragment | [`vendor/star_stock_align.config`](arch/arm64/configs/vendor/star_stock_align.config), from the stock-config delta in [`docs/stock-config-delta.md`](docs/stock-config-delta.md) |
+| Merge order | `lahaina-qgki_defconfig` → `star_QGKI.config` → `star_root.config` → `star_stock_align.config` → `olddefconfig` |
 | Version suffix | `star_root.config` pins `CONFIG_LOCALVERSION` to the stock HyperOS 2.0.7.0 suffix and disables `CONFIG_LOCALVERSION_AUTO`; with the empty `.scmversion` marker, `uname -r` becomes `5.4.274-qgki-g4dfe63e0666f`, matching the stock ROM's vendor_dlkm module vermagic |
 
 Keeping the version suffix does not make this kernel ABI-compatible a priori with any ROM kernel, external modules, or vendor firmware.
@@ -160,9 +161,11 @@ make "${KMAKE[@]}" vendor/lahaina-qgki_defconfig
 scripts/kconfig/merge_config.sh -m -O "$OUT" \
   "$OUT/.config" \
   arch/arm64/configs/vendor/star_QGKI.config \
-  arch/arm64/configs/vendor/star_root.config
+  arch/arm64/configs/vendor/star_root.config \
+  arch/arm64/configs/vendor/star_stock_align.config
 make "${KMAKE[@]}" olddefconfig
 make -s "${KMAKE[@]}" kernelrelease
+# must print 5.4.274-qgki-g4dfe63e0666f
 
 # Clang 18 compat warning flags; unrelated to config generation.
 KCFLAGS_COMPAT="-Wno-pointer-to-enum-cast -Wno-unaligned-access \
@@ -227,9 +230,11 @@ Treat all artifacts as unverified candidates. Check the model and partition layo
 
 | Path | Content |
 | --- | --- |
+| [`docs/stock-config-delta.md`](docs/stock-config-delta.md) | Stock kernel config delta analysis (IKCONFIG extraction + `star_stock_align.config` alignment) |
+| [`docs/stock-kernel-config-OS2.0.7.0.txt`](docs/stock-kernel-config-OS2.0.7.0.txt) | Archived stock kernel `.config` (reference only, not a buildable defconfig) |
 | [`docs/vendor-module-crc-analysis.md`](docs/vendor-module-crc-analysis.md) | Vendor module symbol-CRC analysis (root cause of the black screen) |
 | [`docs/module-crc-check.py`](docs/module-crc-check.py) | Tool to re-run the CRC compatibility measurement |
-| [`docs/firmware-notes.md`](docs/firmware-notes.md) | Reference firmware (HyperOS 2.0.7.0) notes and unpacked boot artifacts |
+| [`docs/firmware-notes.md`](docs/firmware-notes.md) | Reference firmware (HyperOS 2.0.7.0) notes and unpacked boot/vendor artifacts |
 | [`scripts/unpack_firmware.sh`](scripts/unpack_firmware.sh) | OTA payload unpack helper |
 | [`anykernel3/`](anykernel3/) | AnyKernel3 flashable-zip template + build script |
 | [`docs/upstream-patch-policy.md`](docs/upstream-patch-policy.md) | Upstream ACK patch policy retained for contributions |

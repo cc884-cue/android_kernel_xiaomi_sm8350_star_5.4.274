@@ -11,9 +11,24 @@
 - `extracted/` — `boot.img`(201,326,592 B)、`vendor_boot.img`(100,663,296 B)、`dtbo.img`(16 MiB)、`vbmeta.img`(8 KiB)、`vbmeta_system.img`(4 KiB)
 - `components/boot/` — boot 里拆出的 `kernel`(51,161,600 B, ARM64 Image) 与 `ramdisk`
 - `components/vendor_boot/` — `dtb`(4,223,378 B) 与 `vendor_ramdisk`
+- `full/` — OTA payload 补充解出的 `vendor.img`(1.67 GB, EROFS)、`dtbo.img`、`modem.img`(284 MB)、`vbmeta*`
+- `vendor-root/modules/` — 从 `vendor.img` 经 `erofsfuse` 提出的完整原厂模块树（见下）
 - `bin/payload-dumper-go` — 解包工具
 
-`boot.img` 为 Android bootimg（header v3 页大小 4096），与 `build.config.msm.lahaina` 的 `BOOT_IMAGE_HEADER_VERSION=3` 一致。
+`boot.img` 为 Android bootimg（header v3 页大小 4096），与 `build.config.msm.lahaina` 的 `BOOT_IMAGE_HEADER_VERSION=3` 一致。vendor 分区为 EROFS（`LZ4_0PADDING`），用 `erofsfuse vendor.img /mnt/erofs` 挂载提取。
+
+## 官方 vendor 内核模块（2.0.7.0 实机包实测）
+
+| 目录 | `.ko` 数量 | vermagic | 备注 |
+| --- | --- | --- | --- |
+| `/vendor/lib/modules/*.ko` | 112 | `5.4.274-qgki-g4dfe63e0666f` | **运行时实际加载集**（`modules.load` 112 条，与内核 release 完全一致） |
+| `/vendor/lib/modules/5.4-gki/*.ko` | 226 | `5.4.274-g4dfe63e0666f`（无 `-qgki`） | 旧版遗留集，含 `modules.dep/alias/softdep`，ROM 不从其 load |
+
+要点：
+
+- 实际加载的 112 模块集与官方内核 release **逐字节一致**的 vermagic（版本部分）；CRC 面不匹配时 vermagic 对齐也无济于事（见 [`vendor-module-crc-analysis.md`](vendor-module-crc-analysis.md)）。
+- `modules.load` 首个为 `leds-qti-flash.ko`，随后 camera/audio/touch/battery 等按序加载。
+- 官方内核用 `Android (6877366, r383902b1) clang 11.0.2` 构建，提交 `4dfe63e0666f` 属私有树。
 
 ## 打包对应关系
 
