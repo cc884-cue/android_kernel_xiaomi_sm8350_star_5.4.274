@@ -28,6 +28,7 @@ jobs:
             arch/arm64/configs/vendor/star_root.config \
             arch/arm64/configs/vendor/star_stock_align.config
           make O=$O ARCH=arm64 olddefconfig
+          make O=$O ARCH=arm64 LLVM=1 LLVM_IAS=1 prepare || true
           REL="$(make -s O=$O ARCH=arm64 kernelrelease 2>/dev/null)"
           echo "release=$REL" | tee release.txt
           test "$REL" = "5.4.274-qgki-g4dfe63e0666f"
