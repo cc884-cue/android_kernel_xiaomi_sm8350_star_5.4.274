@@ -11,6 +11,7 @@
 #
 .*
 !.github/
+!.scmversion
 !.gitignore
 1*.a
 *.asn1.[ch]
@@ -18,6 +19,7 @@
 *.bz2
 *.c.[012]*.*
 !.github/
+!.scmversion
 !.gitignore
 1*.dt.yaml
 *.dtb
@@ -40,6 +42,7 @@
 *.o
 *.o.*
 !.github/
+!.scmversion
 !.gitignore
 1*.patch
 *.s
@@ -92,6 +95,7 @@ modules.order
 # We don't want to ignore the following even if they are dot-files
 #
 !.github/
+!.scmversion
 !.clang-format
 !.cocciconfig
 !.get_maintainer.ignore
@@ -117,9 +121,11 @@ series
 # cscope files
 cscope.*
 !.github/
+!.scmversion
 !.gitignore
 1ncscope.*
 !.github/
+!.scmversion
 !.gitignore
 1
 # gnu global files
