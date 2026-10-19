@@ -170,6 +170,14 @@ WLAN、指纹、触控、ToF、红外等 `m` 项需要匹配的 `.ko`、依赖�
 
 请将构建产物视为待验证候选。刷写前自行核对机型与分区布局，保留原始启动镜像、可恢复的备份及明确的救援路径；不要仅凭本文将候选包当作已认证可用版本，也不要用于其他机型。
 
+## 仓库结构（本项目新增内容）
+
+| 路径 | 内容 |
+| --- | --- |
+| [docs/firmware-notes.md](docs/firmware-notes.md) | 参考固件包（HyperOS 2.0.7.0）及其 boot 产物说明 |
+| [scripts/unpack_firmware.sh](scripts/unpack_firmware.sh) | OTA payload 解包辅助脚本 |
+| [docs/upstream-patch-policy.md](docs/upstream-patch-policy.md) | 保留的 Android Common Kernels 上游补丁政策 |
+
 ## 源码与许可证
 
-保留上游与各组件原有许可及版权声明，参见内核 [`COPYING`](COPYING)、[`LICENSES/`](LICENSES/) 与 [`KernelSU/LICENSE`](KernelSU/LICENSE)。原有 [`README`](README) 和 [`README.md`](README.md) 保持不变；本文件仅补充本仓库目标与当前集成状态的中文说明。
+保留上游与各组件原有许可及版权声明，参见内核 [`COPYING`](COPYING)、[`LICENSES/`](LICENSES/) 与 [`KernelSU/LICENSE`](KernelSU/LICENSE)。原始上游补丁政策改为 [`docs/upstream-patch-policy.md`](docs/upstream-patch-policy.md) 保存；本文件与英文版 [`README.md`](README.md) 描述本仓库目标与当前集成状态。
